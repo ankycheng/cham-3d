@@ -143,6 +143,7 @@ function createWorker(self) {
   let vertexCount = 0;
   let viewProj;
   const rowLength = 3*4 + 3*4 + 4 + 4;
+  function safeFloat32(buf){ return new Float32Array(buf, 0, Math.floor(buf.byteLength/4)); }
   let lastProj = [];
   let depthIndex = new Uint32Array();
   let lastVertexCount = 0;
@@ -162,8 +163,8 @@ function createWorker(self) {
   function packHalf2x16(x,y){return(floatToHalf(x)|(floatToHalf(y)<<16))>>>0;}
 
   function generateTexture() {
-    if(!buffer)return;
-    const f_buffer=new Float32Array(buffer);
+    if(!buffer||buffer.byteLength<rowLength)return;
+    const f_buffer=safeFloat32(buffer);
     const u_buffer=new Uint8Array(buffer);
     var texwidth=1024*2;
     var texheight=Math.ceil((2*vertexCount)/texwidth);
@@ -204,8 +205,8 @@ function createWorker(self) {
   }
 
   function runSort(viewProj) {
-    if(!buffer)return;
-    const f_buffer=new Float32Array(buffer);
+    if(!buffer||buffer.byteLength<rowLength)return;
+    const f_buffer=safeFloat32(buffer);
     if(lastVertexCount==vertexCount){
       let dot=lastProj[2]*viewProj[2]+lastProj[6]*viewProj[6]+lastProj[10]*viewProj[10];
       if(Math.abs(dot-1)<0.01)return;
@@ -308,7 +309,7 @@ function createWorker(self) {
   let sortRunning;
   self.onmessage=(e)=>{
     if(e.data.ply){vertexCount=0;runSort(viewProj);buffer=processPlyBuffer(e.data.ply);vertexCount=Math.floor(buffer.byteLength/rowLength);postMessage({buffer:buffer});}
-    else if(e.data.buffer){buffer=e.data.buffer;vertexCount=e.data.vertexCount;}
+    else if(e.data.buffer){var b=e.data.buffer;var aligned=b.byteLength-b.byteLength%rowLength;buffer=aligned<b.byteLength?b.slice(0,aligned):b;vertexCount=e.data.vertexCount;}
     else if(e.data.vertexCount){vertexCount=e.data.vertexCount;}
     else if(e.data.view){viewProj=e.data.view;throttledSort();}
   };
