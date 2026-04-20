@@ -382,9 +382,11 @@ async function main() {
 
   const rowLength = 3*4 + 3*4 + 4 + 4;
   const reader = req.body.getReader();
-  let splatData = new Uint8Array(req.headers.get("content-length"));
+  const contentLength = parseInt(req.headers.get("content-length"), 10);
+  let splatData = new Uint8Array(contentLength > 0 ? contentLength : 1024 * 1024);
+  let needsGrow = !(contentLength > 0);
 
-  const downsample = splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio;
+  const downsample = (contentLength > 0 ? contentLength : splatData.length) / rowLength > 500000 ? 1 : 1 / devicePixelRatio;
 
   const worker = new Worker(URL.createObjectURL(
     new Blob(["(", createWorker.toString(), ")(self)"], { type: "application/javascript" })
@@ -604,6 +606,7 @@ async function main() {
   while(true){
     const {done,value}=await reader.read();
     if(done||stopLoading)break;
+    if(needsGrow&&bytesRead+value.length>splatData.length){ const next=new Uint8Array(Math.max(splatData.length*2,bytesRead+value.length)); next.set(splatData); splatData=next; }
     splatData.set(value,bytesRead);
     bytesRead+=value.length;
     if(vertexCount>lastVertexCount){
@@ -614,6 +617,7 @@ async function main() {
     }
   }
   if(!stopLoading){
+    if(needsGrow) splatData=splatData.slice(0,bytesRead);
     if(isPly(splatData)){
       worker.postMessage({ply:splatData.buffer});
     } else {
