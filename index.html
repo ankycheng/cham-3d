@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Masks in 3D — Cham Exhibition | Columbia × AMNH 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0e0e;
+  --text: #f0ebe2;
+  --text-dim: #8a8279;
+  --accent: #a62628;
+  --gold: #b8924a;
+  --panel-bg: rgba(14, 14, 14, 0.88);
+  --t-serif: "EB Garamond", Georgia, "Times New Roman", serif;
+  --t-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--t-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Carousel Track ── */
+.carousel { position: fixed; inset: 0; }
+.track {
+  display: flex;
+  height: 100%;
+  transition: transform 0.55s var(--ease-out);
+  will-change: transform;
+}
+.track.dragging { transition: none; }
+.slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  position: relative;
+}
+.slide iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  background: var(--bg);
+}
+/* Dim non-active viewer during transition for visual depth */
+.slide iframe { transition: opacity 0.4s ease; }
+.slide.inactive iframe { opacity: 0.35; }
+
+/* ── Top Bar ── */
+.top-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.35) 60%, transparent 100%);
+  pointer-events: none;
+}
+.top-bar > * { pointer-events: auto; }
+
+.back-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text); font-family: var(--t-sans); font-size: 13px; font-weight: 500;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.back-btn:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); }
+.back-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+.counter {
+  font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+  font-weight: 500; letter-spacing: 0.05em;
+}
+
+/* ── Navigation Arrows ── */
+.nav-arrow {
+  position: fixed; top: 50%; z-index: 10;
+  transform: translateY(-50%);
+  width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.25s ease;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.nav-arrow:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.3); }
+.nav-arrow:active { transform: translateY(-50%) scale(0.92); }
+.nav-arrow:disabled { opacity: 0; pointer-events: none; }
+.nav-arrow svg { width: 22px; height: 22px; }
+.nav-arrow.prev { left: 16px; }
+.nav-arrow.next { right: 16px; }
+
+/* ── Info Panel (bottom) ── */
+.info-panel {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  padding: 48px 24px 28px;
+  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 65%, transparent 100%);
+  touch-action: pan-x;
+}
+.info-inner {
+  max-width: 600px; margin: 0 auto; text-align: center;
+}
+.info-text { transition: opacity 0.3s ease, transform 0.3s ease; }
+.info-text.fade-out { opacity: 0; transform: translateY(6px); }
+
+.mask-name {
+  font-family: var(--t-serif); font-size: clamp(24px, 5vw, 32px);
+  font-weight: 500; letter-spacing: 0.02em; line-height: 1.2;
+}
+.mask-tibetan {
+  font-size: 14px; color: var(--gold); margin-top: 2px;
+  letter-spacing: 0.04em;
+}
+.mask-desc {
+  font-size: 14px; color: var(--text-dim); line-height: 1.6;
+  margin-top: 10px; max-width: 480px; margin-left: auto; margin-right: auto;
+}
+
+/* ── Dots ── */
+.dots {
+  display: flex; justify-content: center; gap: 8px;
+  margin-top: 18px;
+}
+.dot {
+  height: 6px; border-radius: 3px;
+  border: none; cursor: pointer; padding: 0;
+  background: rgba(255,255,255,0.25);
+  width: 6px;
+  transition: all 0.4s var(--ease-out);
+}
+.dot.active {
+  background: var(--gold);
+  width: 28px;
+}
+
+/* ── Hint text ── */
+.hint {
+  display: flex; justify-content: center; gap: 16px;
+  margin-top: 12px; font-size: 11px; color: rgba(255,255,255,0.3);
+  letter-spacing: 0.03em;
+}
+.hint span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Loading overlay for unloaded iframes ── */
+.slide-loading {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); z-index: 2;
+  font-size: 14px; color: var(--text-dim);
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.slide-loading.hidden { opacity: 0; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .nav-arrow { width: 44px; height: 44px; }
+  .nav-arrow svg { width: 18px; height: 18px; }
+  .nav-arrow.prev { left: 8px; }
+  .nav-arrow.next { right: 8px; }
+  .info-panel { padding: 36px 16px 20px; }
+  .mask-desc { font-size: 13px; margin-top: 8px; }
+  .back-btn { font-size: 12px; padding: 7px 12px; }
+}
+@media (max-width: 380px) {
+  .nav-arrow { width: 38px; height: 38px; }
+}
+
+/* ── Entrance animation ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.info-panel { animation: fadeUp 0.6s 0.3s ease both; }
+.top-bar { animation: fadeUp 0.6s 0.2s ease both; }
+.nav-arrow { animation: fadeUp 0.4s 0.5s ease both; }
+</style>
+</head>
+<body>
+
+<!-- Carousel -->
+<div class="carousel">
+  <div class="track" id="track">
+    <div class="slide" data-index="0">
+      <iframe src="viewer.html?url=./mask-left.ply" title="Shawa deer mask — 3D view"></iframe>
+    </div>
+    <div class="slide" data-index="1">
+      <iframe data-src="viewer.html?url=./mask-center.ply" title="Guru DrakMar mask — 3D view"></iframe>
+      <div class="slide-loading">Loading…</div>
+    </div>
+    <div class="slide" data-index="2">
+      <iframe data-src="viewer.html?url=./mask-right.ply" title="ZhaNag black hat — 3D view"></iframe>
+      <div class="slide-loading">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Top bar -->
+<div class="top-bar" id="topBar">
+  <button class="back-btn" id="backBtn" title="Return to exhibition page">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+    Back to Exhibition
+  </button>
+  <span class="counter" id="counter">1 / 3</span>
+</div>
+
+<!-- Navigation arrows -->
+<button class="nav-arrow prev" id="prevBtn" aria-label="Previous mask" disabled>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+</button>
+<button class="nav-arrow next" id="nextBtn" aria-label="Next mask">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+</button>
+
+<!-- Info panel -->
+<div class="info-panel" id="infoPanel">
+  <div class="info-inner">
+    <div class="info-text" id="infoText">
+      <h2 class="mask-name" id="maskName"></h2>
+      <div class="mask-tibetan" id="maskTibetan"></div>
+      <p class="mask-desc" id="maskDesc"></p>
+    </div>
+    <div class="dots" id="dots"></div>
+    <div class="hint">
+      <span>Drag to rotate</span>
+      <span>·</span>
+      <span>Scroll to zoom</span>
+      <span>·</span>
+      <span>Arrows to switch</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Mask Data ── */
+const masks = [
+  {
+    name: 'Shawa',
+    tibetan: 'ཤ་བ · Deer Mask',
+    desc: 'The deer assistant to the lord of death, Yama. This character clears away obstacles during the Cham performance through lively, leaping movements that mimic the natural behaviors of deer.',
+  },
+  {
+    name: 'Guru DrakMar',
+    tibetan: 'གུ་རུ་དྲག་དམར · Red Guru Mask',
+    desc: 'A wrathful manifestation of Padmasambhava, the Buddhist teacher who brought Buddhism to Tibet. The fierce red face and crown of skulls symbolize the power to subdue demons and transform negative forces.',
+  },
+  {
+    name: 'ZhaNag',
+    tibetan: 'ཞྭ་ནག · Black Hat',
+    desc: 'Associated with the Black Hat dance depicting the defeat of king Langdarma and the return of Buddhism. These papier-mâché masks were made at Yonghe Temple in Beijing, circa 1900.',
+  },
+];
+
+/* ── DOM refs ── */
+const track = document.getElementById('track');
+const infoText = document.getElementById('infoText');
+const maskName = document.getElementById('maskName');
+const maskTibetan = document.getElementById('maskTibetan');
+const maskDesc = document.getElementById('maskDesc');
+const counter = document.getElementById('counter');
+const dotsEl = document.getElementById('dots');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const slides = [...document.querySelectorAll('.slide')];
+const iframes = slides.map(s => s.querySelector('iframe'));
+
+let current = 0;
+let transitioning = false;
+
+/* ── Build dots ── */
+masks.forEach((_, i) => {
+  const d = document.createElement('button');
+  d.className = 'dot' + (i === 0 ? ' active' : '');
+  d.setAttribute('aria-label', `View ${masks[i].name}`);
+  d.addEventListener('click', () => goTo(i));
+  dotsEl.appendChild(d);
+});
+const dotEls = [...dotsEl.querySelectorAll('.dot')];
+
+/* ── Set info (no animation) ── */
+function setInfo(i) {
+  const m = masks[i];
+  maskName.textContent = m.name;
+  maskTibetan.textContent = m.tibetan;
+  maskDesc.textContent = m.desc;
+  counter.textContent = `${i + 1} / ${masks.length}`;
+  dotEls.forEach((d, j) => d.classList.toggle('active', j === i));
+}
+
+/* ── Animate info cross-fade ── */
+function animateInfo(i) {
+  infoText.classList.add('fade-out');
+  setTimeout(() => {
+    setInfo(i);
+    infoText.classList.remove('fade-out');
+  }, 280);
+}
+
+/* ── Lazy-load iframe ── */
+function loadSlide(i) {
+  const iframe = iframes[i];
+  if (!iframe || !iframe.dataset.src) return;
+  iframe.src = iframe.dataset.src;
+  delete iframe.dataset.src;
+  iframe.addEventListener('load', () => {
+    const overlay = slides[i].querySelector('.slide-loading');
+    if (overlay) overlay.classList.add('hidden');
+  }, { once: true });
+}
+
+/* ── Mark active / inactive slides ── */
+function updateSlideStates(i) {
+  slides.forEach((s, j) => {
+    s.classList.toggle('inactive', j !== i);
+  });
+  // Remove inactive dim after transition settles
+  setTimeout(() => {
+    slides.forEach(s => s.classList.remove('inactive'));
+  }, 600);
+}
+
+/* ── Go to slide ── */
+function goTo(i) {
+  if (i < 0 || i >= masks.length || i === current || transitioning) return;
+  transitioning = true;
+
+  // Ensure target is loaded
+  loadSlide(i);
+
+  // Dim non-target slides during transition
+  updateSlideStates(i);
+
+  current = i;
+  track.style.transform = `translateX(-${current * 100}%)`;
+  animateInfo(current);
+
+  prevBtn.disabled = current === 0;
+  nextBtn.disabled = current === masks.length - 1;
+
+  // Preload adjacent
+  if (current > 0) loadSlide(current - 1);
+  if (current < masks.length - 1) loadSlide(current + 1);
+
+  // Unlock after transition
+  setTimeout(() => { transitioning = false; }, 580);
+}
+
+/* ── Arrow clicks ── */
+prevBtn.addEventListener('click', () => goTo(current - 1));
+nextBtn.addEventListener('click', () => goTo(current + 1));
+
+/* ── Keyboard ── */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'Left') goTo(current - 1);
+  if (e.key === 'ArrowRight' || e.key === 'Right') goTo(current + 1);
+});
+
+/* ── Touch swipe (on top bar + info panel) ── */
+function addSwipe(el) {
+  let startX = 0, startY = 0, startTime = 0;
+  el.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTime = Date.now();
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    const dt = Date.now() - startTime;
+    // Horizontal swipe: > 40px, mostly horizontal, within 600ms
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2 && dt < 600) {
+      if (dx < 0) goTo(current + 1);
+      else goTo(current - 1);
+    }
+  }, { passive: true });
+}
+addSwipe(document.getElementById('infoPanel'));
+addSwipe(document.getElementById('topBar'));
+
+/* ── Back button ── */
+document.getElementById('backBtn').addEventListener('click', () => {
+  const params = new URLSearchParams(window.location.search);
+  const returnUrl = params.get('return') || 'https://archaeology.columbia.edu/cham#splat';
+  window.location.href = returnUrl;
+});
+
+/* ── Init ── */
+setInfo(0);
+prevBtn.disabled = true;
+// Preload adjacent slide after first model starts loading
+setTimeout(() => loadSlide(1), 2500);
+setTimeout(() => loadSlide(2), 4500);
+</script>
+</body>
+</html>
