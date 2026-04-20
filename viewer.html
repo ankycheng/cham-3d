@@ -378,8 +378,12 @@ async function main() {
   try { viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1))); } catch(e){}
 
   const url = params.get("url") || "./cham-masks.ply";
-  const req = await fetch(url, { mode: "cors", credentials: "omit" });
-  if (req.status != 200) throw new Error(req.status + " Unable to load " + req.url);
+  let req;
+  for(let attempt=0;attempt<3;attempt++){
+    try{ req=await fetch(url,{mode:"cors",credentials:"omit"}); if(req.status===200)break; }catch(e){}
+    if(attempt<2){ document.getElementById("spinner").textContent="Retrying..."; await new Promise(r=>setTimeout(r,1000*(attempt+1))); }
+  }
+  if(!req||req.status!=200) throw new Error((req?req.status:"network error")+" Unable to load "+url);
 
   const rowLength = 3*4 + 3*4 + 4 + 4;
   const reader = req.body.getReader();
@@ -397,6 +401,8 @@ async function main() {
   const fps = document.getElementById("fps");
   const camid = document.getElementById("camid");
   let projectionMatrix;
+
+  canvas.addEventListener("webglcontextlost",(e)=>{e.preventDefault();document.getElementById("spinner").innerHTML='Context lost. <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline">Reload</a>';document.getElementById("spinner").style.display="";});
 
   const gl = canvas.getContext("webgl2", { antialias: false });
 
@@ -629,7 +635,7 @@ async function main() {
 
 main().catch((err) => {
   document.getElementById("spinner").style.display="none";
-  document.getElementById("message").innerText=err.toString();
+  document.getElementById("message").innerHTML=err.toString()+' <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline;margin-left:8px">Retry</a>';
 });
   </script>
 </body>
