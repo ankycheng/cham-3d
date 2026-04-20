@@ -51,9 +51,8 @@ body {
   display: block;
   background: var(--bg);
 }
-/* Dim non-active viewer during transition for visual depth */
+/* Smooth iframe appearance */
 .slide iframe { transition: opacity 0.4s ease; }
-.slide.inactive iframe { opacity: 0.35; }
 
 /* ── Top Bar ── */
 .top-bar {
@@ -151,17 +150,6 @@ body {
 }
 .hint span { display: inline-flex; align-items: center; gap: 4px; }
 
-/* ── Loading overlay for unloaded iframes ── */
-.slide-loading {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--bg); z-index: 2;
-  font-size: 14px; color: var(--text-dim);
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-}
-.slide-loading.hidden { opacity: 0; }
-
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .nav-arrow { width: 44px; height: 44px; }
@@ -192,15 +180,13 @@ body {
 <div class="carousel">
   <div class="track" id="track">
     <div class="slide" data-index="0">
-      <iframe src="viewer.html?url=./mask-left.splat" title="Shawa deer mask — 3D view"></iframe>
+      <iframe title="Shawa deer mask — 3D view"></iframe>
     </div>
     <div class="slide" data-index="1">
-      <iframe data-src="viewer.html?url=./mask-center.splat" title="Guru DrakMar mask — 3D view"></iframe>
-      <div class="slide-loading">Loading…</div>
+      <iframe title="Guru DrakMar mask — 3D view"></iframe>
     </div>
     <div class="slide" data-index="2">
-      <iframe data-src="viewer.html?url=./mask-right.splat" title="ZhaNag black hat — 3D view"></iframe>
-      <div class="slide-loading">Loading…</div>
+      <iframe title="ZhaNag black hat — 3D view"></iframe>
     </div>
   </div>
 </div>
@@ -248,16 +234,19 @@ const masks = [
     name: 'Shawa',
     tibetan: 'ཤ་བ · Deer Mask',
     desc: 'The deer assistant to the lord of death, Yama. This character clears away obstacles during the Cham performance through lively, leaping movements that mimic the natural behaviors of deer.',
+    url: 'viewer.html?url=./mask-left.splat',
   },
   {
     name: 'Guru DrakMar',
     tibetan: 'གུ་རུ་དྲག་དམར · Red Guru Mask',
     desc: 'A wrathful manifestation of Padmasambhava, the Buddhist teacher who brought Buddhism to Tibet. The fierce red face and crown of skulls symbolize the power to subdue demons and transform negative forces.',
+    url: 'viewer.html?url=./mask-center.splat',
   },
   {
     name: 'ZhaNag',
     tibetan: 'ཞྭ་ནག · Black Hat',
     desc: 'Associated with the Black Hat dance depicting the defeat of king Langdarma and the return of Buddhism. These papier-mâché masks were made at Yonghe Temple in Beijing, circa 1900.',
+    url: 'viewer.html?url=./mask-right.splat',
   },
 ];
 
@@ -306,39 +295,25 @@ function animateInfo(i) {
   }, 280);
 }
 
-/* ── Lazy-load iframe ── */
-function loadSlide(i) {
-  const iframe = iframes[i];
-  if (!iframe || !iframe.dataset.src) return;
-  iframe.src = iframe.dataset.src;
-  delete iframe.dataset.src;
-  iframe.addEventListener('load', () => {
-    const overlay = slides[i].querySelector('.slide-loading');
-    if (overlay) overlay.classList.add('hidden');
-  }, { once: true });
-}
-
-/* ── Mark active / inactive slides ── */
-function updateSlideStates(i) {
-  slides.forEach((s, j) => {
-    s.classList.toggle('inactive', j !== i);
+/* ── Load only the active slide, unload others ── */
+function activateSlide(i) {
+  iframes.forEach((iframe, j) => {
+    if (j === i) {
+      if (!iframe.src || !iframe.src.includes('viewer.html')) {
+        iframe.src = masks[i].url;
+      }
+    } else {
+      if (iframe.src && iframe.src.includes('viewer.html')) {
+        iframe.removeAttribute('src');
+      }
+    }
   });
-  // Remove inactive dim after transition settles
-  setTimeout(() => {
-    slides.forEach(s => s.classList.remove('inactive'));
-  }, 600);
 }
 
 /* ── Go to slide ── */
 function goTo(i) {
   if (i < 0 || i >= masks.length || i === current || transitioning) return;
   transitioning = true;
-
-  // Ensure target is loaded
-  loadSlide(i);
-
-  // Dim non-target slides during transition
-  updateSlideStates(i);
 
   current = i;
   track.style.transform = `translateX(-${current * 100}%)`;
@@ -347,12 +322,11 @@ function goTo(i) {
   prevBtn.disabled = current === 0;
   nextBtn.disabled = current === masks.length - 1;
 
-  // Preload adjacent
-  if (current > 0) loadSlide(current - 1);
-  if (current < masks.length - 1) loadSlide(current + 1);
-
-  // Unlock after transition
-  setTimeout(() => { transitioning = false; }, 580);
+  // Load new slide after transition animation completes
+  setTimeout(() => {
+    activateSlide(current);
+    transitioning = false;
+  }, 580);
 }
 
 /* ── Arrow clicks ── */
@@ -397,9 +371,7 @@ document.getElementById('backBtn').addEventListener('click', () => {
 /* ── Init ── */
 setInfo(0);
 prevBtn.disabled = true;
-// Preload adjacent slide after first model starts loading
-setTimeout(() => loadSlide(1), 2500);
-setTimeout(() => loadSlide(2), 4500);
+activateSlide(0);
 </script>
 </body>
 </html>
