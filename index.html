@@ -265,6 +265,13 @@ const iframes = slides.map(s => s.querySelector('iframe'));
 
 let current = 0;
 let transitioning = false;
+const assetVersion = String(Date.parse(document.lastModified) || Date.now());
+
+function viewerUrlFor(i) {
+  const url = new URL(masks[i].url, location.href);
+  url.searchParams.set('v', assetVersion);
+  return url.toString();
+}
 
 /* ── Build dots ── */
 masks.forEach((_, i) => {
@@ -300,7 +307,7 @@ function activateSlide(i) {
   iframes.forEach((iframe, j) => {
     if (j === i) {
       if (!iframe.src || !iframe.src.includes('viewer.html')) {
-        iframe.src = masks[i].url;
+        iframe.src = viewerUrlFor(i);
       }
     } else {
       if (iframe.src && iframe.src.includes('viewer.html')) {

@@ -138,6 +138,44 @@ function translate4(a, x, y, z) {
     a[2]*x+a[6]*y+a[10]*z+a[14], a[3]*x+a[7]*y+a[11]*z+a[15]];
 }
 
+function appendSearchParam(inputUrl, key, value) {
+  const resolved = new URL(inputUrl, location.href);
+  if (value && !resolved.searchParams.has(key)) resolved.searchParams.set(key, value);
+  return resolved.toString();
+}
+
+function createErrorDetails(prefix, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(prefix ? `${prefix}: ${message}` : message);
+}
+
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error("Unable to allocate WebGL shader");
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(shader) || "Unknown shader compile error";
+    gl.deleteShader(shader);
+    throw new Error(info);
+  }
+  return shader;
+}
+
+function linkProgram(gl, vertexShader, fragmentShader) {
+  const program = gl.createProgram();
+  if (!program) throw new Error("Unable to allocate WebGL program");
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const info = gl.getProgramInfoLog(program) || "Unknown program link error";
+    gl.deleteProgram(program);
+    throw new Error(info);
+  }
+  return program;
+}
+
 function createWorker(self) {
   let buffer;
   let vertexCount = 0;
@@ -162,8 +200,13 @@ function createWorker(self) {
   }
   function packHalf2x16(x,y){return(floatToHalf(x)|(floatToHalf(y)<<16))>>>0;}
 
+  function postError(error) {
+    const message = error && error.message ? error.message : String(error);
+    self.postMessage({ type: "error", message, stack: error && error.stack ? error.stack : "" });
+  }
+
   function generateTexture() {
-    if(!buffer||buffer.byteLength<rowLength)return;
+    if(!buffer||buffer.byteLength<rowLength||!vertexCount)return;
     const f_buffer=safeFloat32(buffer);
     const u_buffer=new Uint8Array(buffer);
     var texwidth=1024*2;
@@ -205,9 +248,9 @@ function createWorker(self) {
   }
 
   function runSort(viewProj) {
-    if(!buffer||buffer.byteLength<rowLength)return;
+    if(!viewProj||!buffer||buffer.byteLength<rowLength||!vertexCount)return;
     const f_buffer=safeFloat32(buffer);
-    if(lastVertexCount==vertexCount){
+    if(lastVertexCount==vertexCount&&lastProj.length===16){
       let dot=lastProj[2]*viewProj[2]+lastProj[6]*viewProj[6]+lastProj[10]*viewProj[10];
       if(Math.abs(dot-1)<0.01)return;
     } else { generateTexture(); lastVertexCount=vertexCount; }
@@ -220,9 +263,10 @@ function createWorker(self) {
       if(depth>maxDepth)maxDepth=depth;
       if(depth<minDepth)minDepth=depth;
     }
-    let depthInv=(256*256-1)/(maxDepth-minDepth);
+    let depthRange=maxDepth-minDepth;
+    let depthInv=depthRange===0?0:(256*256-1)/depthRange;
     let counts0=new Uint32Array(256*256);
-    for(let i=0;i<vertexCount;i++){sizeList[i]=((sizeList[i]-minDepth)*depthInv)|0;counts0[sizeList[i]]++;}
+    for(let i=0;i<vertexCount;i++){sizeList[i]=depthRange===0?0:((sizeList[i]-minDepth)*depthInv)|0;counts0[sizeList[i]]++;}
     let starts0=new Uint32Array(256*256);
     for(let i=1;i<256*256;i++)starts0[i]=starts0[i-1]+counts0[i-1];
     depthIndex=new Uint32Array(vertexCount);
@@ -308,11 +352,27 @@ function createWorker(self) {
   };
   let sortRunning;
   self.onmessage=(e)=>{
-    if(e.data.ply){vertexCount=0;runSort(viewProj);buffer=processPlyBuffer(e.data.ply);vertexCount=Math.floor(buffer.byteLength/rowLength);postMessage({buffer:buffer});}
-    else if(e.data.buffer){var b=e.data.buffer;var aligned=b.byteLength-b.byteLength%rowLength;buffer=aligned<b.byteLength?b.slice(0,aligned):b;vertexCount=e.data.vertexCount;}
-    else if(e.data.vertexCount){vertexCount=e.data.vertexCount;}
-    else if(e.data.view){viewProj=e.data.view;throttledSort();}
+    try {
+      if(e.data.ply){
+        buffer=processPlyBuffer(e.data.ply);
+        vertexCount=Math.floor(buffer.byteLength/rowLength);
+        self.postMessage({buffer:buffer});
+        if(viewProj)runSort(viewProj);
+      }
+      else if(e.data.buffer){
+        var b=e.data.buffer;
+        var aligned=b.byteLength-b.byteLength%rowLength;
+        buffer=aligned<b.byteLength?b.slice(0,aligned):b;
+        vertexCount=e.data.vertexCount;
+        if(viewProj)runSort(viewProj);
+      }
+      else if(e.data.vertexCount){vertexCount=e.data.vertexCount;}
+      else if(e.data.view){viewProj=e.data.view;throttledSort();}
+    } catch (error) {
+      postError(error);
+    }
   };
+  self.postMessage({ type: "ready" });
 }
 
 const vertexShaderSource = `#version 300 es
@@ -374,51 +434,71 @@ let viewMatrix = defaultViewMatrix;
 
 async function main() {
   let carousel = false;
+  const spinner = document.getElementById("spinner");
+  const progressBar = document.getElementById("progress");
+  const message = document.getElementById("message");
+  const canvas = document.getElementById("canvas");
+  const fps = document.getElementById("fps");
+  const camid = document.getElementById("camid");
   const params = new URLSearchParams(location.search);
   try { viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1))); } catch(e){}
 
-  const url = params.get("url") || "./cham-masks.ply";
+  const cacheVersion = params.get("v") || String(Date.parse(document.lastModified) || Date.now());
+  const url = appendSearchParam(params.get("url") || "./cham-masks.ply", "v", cacheVersion);
   let req;
   for(let attempt=0;attempt<3;attempt++){
-    try{ req=await fetch(url,{mode:"cors",credentials:"omit"}); if(req.status===200)break; }catch(e){}
-    if(attempt<2){ document.getElementById("spinner").textContent="Retrying..."; await new Promise(r=>setTimeout(r,1000*(attempt+1))); }
+    try{ req=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store"}); if(req.status===200)break; }catch(e){}
+    if(attempt<2){ spinner.textContent="Retrying..."; await new Promise(r=>setTimeout(r,1000*(attempt+1))); }
   }
   if(!req||req.status!=200) throw new Error((req?req.status:"network error")+" Unable to load "+url);
 
   const rowLength = 3*4 + 3*4 + 4 + 4;
-  const splatData = new Uint8Array(await req.arrayBuffer());
+  let splatData = new Uint8Array(await req.arrayBuffer());
+  let sourceVertexCount = Math.max(1, Math.floor(splatData.length / rowLength));
 
   const downsample = splatData.length / rowLength > 500000 ? 1 : 1 / devicePixelRatio;
-
-  const worker = new Worker(URL.createObjectURL(
-    new Blob(["(", createWorker.toString(), ")(self)"], { type: "application/javascript" })
-  ));
-
-  const canvas = document.getElementById("canvas");
-  const fps = document.getElementById("fps");
-  const camid = document.getElementById("camid");
   let projectionMatrix;
+  let frameHandle = 0;
+  let worker;
+  let workerReadyResolve;
+  let workerReadyReject;
+  let workerReadyTimer;
+  let workerReady = new Promise((resolve, reject) => {
+    workerReadyResolve = resolve;
+    workerReadyReject = reject;
+  });
+  let loadFailed = false;
+  let textureReady = false;
+  let indexReady = false;
+  let lastWorkerProgress = performance.now();
+  let vertexCount = 0;
 
-  canvas.addEventListener("webglcontextlost",(e)=>{e.preventDefault();document.getElementById("spinner").innerHTML='Context lost. <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline">Reload</a>';document.getElementById("spinner").style.display="";});
+  const fail = (error) => {
+    if (loadFailed) return;
+    loadFailed = true;
+    if (workerReadyTimer) clearTimeout(workerReadyTimer);
+    if (workerReadyReject) workerReadyReject(error instanceof Error ? error : new Error(String(error)));
+    if (frameHandle) cancelAnimationFrame(frameHandle);
+    if (worker) worker.terminate();
+    spinner.style.display="none";
+    progressBar.style.display="none";
+    message.innerHTML=(error instanceof Error ? error.message : String(error))+' <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline;margin-left:8px">Retry</a>';
+  };
+
+  canvas.addEventListener("webglcontextlost",(e)=>{
+    e.preventDefault();
+    fail(new Error("WebGL context lost"));
+    spinner.innerHTML='Context lost. <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline">Reload</a>';
+    spinner.style.display="";
+  });
 
   const gl = canvas.getContext("webgl2", { antialias: false });
+  if (!gl) throw new Error("WebGL2 is unavailable in this browser");
 
-  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-  gl.shaderSource(vertexShader, vertexShaderSource);
-  gl.compileShader(vertexShader);
-  if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(vertexShader));
-
-  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-  gl.shaderSource(fragmentShader, fragmentShaderSource);
-  gl.compileShader(fragmentShader);
-  if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fragmentShader));
-
-  const program = gl.createProgram();
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+  const program = linkProgram(gl, vertexShader, fragmentShader);
   gl.useProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(program));
 
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
@@ -440,10 +520,17 @@ async function main() {
   gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
 
   var texture = gl.createTexture();
+  if (!texture) throw new Error("Unable to allocate WebGL texture");
+  gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.uniform1i(gl.getUniformLocation(program, "u_texture"), 0);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
   const indexBuffer = gl.createBuffer();
+  if (!indexBuffer) throw new Error("Unable to allocate WebGL index buffer");
   const a_index = gl.getAttribLocation(program, "index");
   gl.enableVertexAttribArray(a_index);
   gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
@@ -462,25 +549,45 @@ async function main() {
   window.addEventListener("resize", resize);
   resize();
 
-  let vertexCount = 0;
-  worker.onmessage = (e) => {
-    if (e.data.buffer) {
-      splatData = new Uint8Array(e.data.buffer);
-    } else if (e.data.texdata) {
-      const { texdata, texwidth, texheight } = e.data;
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32UI, texwidth, texheight, 0, gl.RGBA_INTEGER, gl.UNSIGNED_INT, texdata);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-    } else if (e.data.depthIndex) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, e.data.depthIndex, gl.DYNAMIC_DRAW);
-      vertexCount = e.data.vertexCount;
+  const handleWorkerMessage = (e) => {
+    if (loadFailed) return;
+    lastWorkerProgress = performance.now();
+    try {
+      if (e.data.type === "ready") {
+        if (workerReadyTimer) clearTimeout(workerReadyTimer);
+        workerReadyResolve();
+      } else if (e.data.type === "error") {
+        fail(new Error(e.data.message || "Worker error"));
+      } else if (e.data.buffer) {
+        splatData = new Uint8Array(e.data.buffer);
+        sourceVertexCount = Math.max(1, Math.floor(splatData.length / rowLength));
+      } else if (e.data.texdata) {
+        const { texdata, texwidth, texheight } = e.data;
+        textureReady = false;
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32UI, texwidth, texheight, 0, gl.RGBA_INTEGER, gl.UNSIGNED_INT, texdata);
+        const glError = gl.getError();
+        if (glError !== gl.NO_ERROR) throw new Error("WebGL texture upload failed (" + glError + ")");
+        textureReady = true;
+      } else if (e.data.depthIndex) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, e.data.depthIndex, gl.DYNAMIC_DRAW);
+        vertexCount = e.data.vertexCount;
+        indexReady = vertexCount > 0;
+        const glError = gl.getError();
+        if (glError !== gl.NO_ERROR) throw new Error("WebGL index upload failed (" + glError + ")");
+      }
+    } catch (error) {
+      fail(createErrorDetails("Renderer update failed", error));
     }
+  };
+  const handleWorkerError = (event) => {
+    const details = event && event.message ? event.message : "Unknown worker failure";
+    fail(new Error("Worker crashed: " + details));
+  };
+  const handleWorkerMessageError = () => {
+    fail(new Error("Worker message could not be decoded"));
   };
 
   // Mouse controls
@@ -566,6 +673,7 @@ async function main() {
 
   let lastFrame=0, avgFps=0, start=0;
   const frame = (now) => {
+    if (loadFailed) return;
     let inv = invert4(viewMatrix);
     let shiftKey = activeKeys.includes("ShiftLeft")||activeKeys.includes("ShiftRight");
     if(activeKeys.includes("ArrowUp")){ inv=translate4(inv,0,shiftKey?-0.03:0,shiftKey?0:0.1); }
@@ -581,41 +689,66 @@ async function main() {
 
     const viewProj = multiply4(projectionMatrix, viewMatrix);
     worker.postMessage({ view: viewProj });
+    if (!(textureReady && indexReady && vertexCount > 0) && performance.now() - lastWorkerProgress > 15000) {
+      fail(new Error("Model processing stalled before render data was ready"));
+      return;
+    }
 
     const currentFps = 1000/(now-lastFrame)||0;
     avgFps = avgFps*0.9+currentFps*0.1;
 
-    if(vertexCount > 0){
-      document.getElementById("spinner").style.display="none";
+    if(textureReady && indexReady && vertexCount > 0){
+      spinner.style.display="none";
       gl.uniformMatrix4fv(u_view, false, viewMatrix);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, vertexCount);
     } else {
       gl.clear(gl.COLOR_BUFFER_BIT);
-      document.getElementById("spinner").style.display="";
+      spinner.style.display="";
       start=Date.now()+2000;
     }
-    const progress=(100*vertexCount)/(splatData.length/rowLength);
-    if(progress<100){ document.getElementById("progress").style.width=progress+"%"; }
-    else { document.getElementById("progress").style.display="none"; }
+    const progress=(100*vertexCount)/sourceVertexCount;
+    if(progress<100){ progressBar.style.width=progress+"%"; }
+    else { progressBar.style.display="none"; }
     fps.innerText=Math.round(avgFps)+" fps";
     lastFrame=now;
-    requestAnimationFrame(frame);
+    frameHandle=requestAnimationFrame(frame);
   };
-  frame();
 
   const isPly=(d)=>d[0]==112&&d[1]==108&&d[2]==121&&d[3]==10;
+
+  let workerUrl;
+  try {
+    workerUrl = URL.createObjectURL(new Blob(["(", createWorker.toString(), ")(self)"], { type: "application/javascript" }));
+    worker = new Worker(workerUrl);
+  } catch (error) {
+    throw createErrorDetails("Failed to create worker", error);
+  } finally {
+    if (workerUrl) URL.revokeObjectURL(workerUrl);
+  }
+
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = handleWorkerError;
+  worker.onmessageerror = handleWorkerMessageError;
+  workerReadyTimer = setTimeout(() => {
+    workerReadyReject(new Error("Worker initialization timed out"));
+  }, 5000);
+  await workerReady;
+  lastWorkerProgress = performance.now();
 
   if(isPly(splatData)){
     worker.postMessage({ply:splatData.buffer});
   } else {
-    worker.postMessage({buffer:splatData.buffer,vertexCount:Math.floor(splatData.length/rowLength)});
+    worker.postMessage({buffer:splatData.buffer,vertexCount:sourceVertexCount});
   }
+  worker.postMessage({ view: multiply4(projectionMatrix, viewMatrix) });
+  frameHandle=requestAnimationFrame(frame);
 }
 
 main().catch((err) => {
   document.getElementById("spinner").style.display="none";
-  document.getElementById("message").innerHTML=err.toString()+' <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline;margin-left:8px">Retry</a>';
+  document.getElementById("progress").style.display="none";
+  document.getElementById("message").innerHTML=(err instanceof Error ? err.message : String(err))+' <a href="javascript:location.reload()" style="color:#fff;text-decoration:underline;margin-left:8px">Retry</a>';
 });
   </script>
 </body>
