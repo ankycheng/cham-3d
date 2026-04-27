@@ -25,11 +25,12 @@ const ROW = 32;
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 // X positions: world -X → screen left, world +X → screen right under our
-// default camera. Order matches the carousel's reading order.
+// default camera. Order matches the carousel's reading order. Spacing is
+// 1.5× the original so each mask gets visible breathing room.
 const layout = [
-  { file: 'mask-shawa.splat',        dx: -0.60 }, // screen-left
+  { file: 'mask-shawa.splat',        dx: -0.90 }, // screen-left
   { file: 'mask-guru-drakmar.splat', dx:  0.00 }, // middle
-  { file: 'mask-zhanag.splat',       dx:  0.55 }, // screen-right
+  { file: 'mask-zhanag.splat',       dx:  0.825 }, // screen-right
 ];
 
 // Visual-center Y offsets — hand-tuned from front-view trio renders. The
@@ -43,7 +44,7 @@ const layout = [
 // face level of each mask, and adjust dy until the three faces line up.
 // Negative dy lifts the splat up on screen, positive dy drops it down.
 const dyByFile = {
-  'mask-shawa.splat':        -0.10,
+  'mask-shawa.splat':         0.10,
   'mask-guru-drakmar.splat':  0.00,
   'mask-zhanag.splat':        0.05,
 };
