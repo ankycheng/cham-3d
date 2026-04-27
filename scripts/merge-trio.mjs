@@ -32,28 +32,20 @@ const layout = [
   { file: 'mask-zhanag.splat',       dx:  0.55 }, // screen-right
 ];
 
-// Visual-center Y offsets, derived from rendering each mask alone in
-// preview.html (dist=1.4) and measuring the pixel-y centroid of non-background
-// pixels (scripts/measure-visual-center.mjs). Bbox bases would mis-align
-// because each mask's "base" sits at a different physical level relative to
-// where the eye reads the visual mass (Shawa's deer head vs ZhaNag's tall
-// stand-and-hat). The per-mask dy shifts each rendered centroid onto a shared
-// screen line.
+// Visual-center Y offsets — hand-tuned from front-view trio renders. The
+// auto-measured pixel centroid (scripts/measure-visual-center.mjs) under-
+// corrects because the mean is dragged by Shawa's antlers (mass above the
+// face) and ZhaNag's wide circular base (mass below the face). What looks
+// "aligned" to a viewer is each mask's *face* sitting on a shared horizontal
+// line, which the auto centroid only approximates.
 //
-// Conversion: at fy=1100, projection-height=873, canvas-pixel-height=1746,
-// dist=1.4, the pixel-per-world-y ratio is fy * H_canvas / (H_proj * dist) ≈
-// 1571 px / world-unit. dy = (target_centroid_px - measured_centroid_px) / 1571.
-//
-// Measured centroids (px, lower = lower on screen):
-//   shawa  957.8   guru  894.7   zhanag  884.5
-// Aligning all to the average (912.3 px):
-//   shawa  → dy ≈ -0.029  (lift up)
-//   guru   → dy ≈ +0.011  (drop slightly)
-//   zhanag → dy ≈ +0.018  (drop slightly)
+// Tuning workflow: render preview.html?rotate=99999&dist=3.5, eyeball the
+// face level of each mask, and adjust dy until the three faces line up.
+// Negative dy lifts the splat up on screen, positive dy drops it down.
 const dyByFile = {
-  'mask-shawa.splat':        -0.029,
-  'mask-guru-drakmar.splat':  0.011,
-  'mask-zhanag.splat':        0.018,
+  'mask-shawa.splat':        -0.10,
+  'mask-guru-drakmar.splat':  0.00,
+  'mask-zhanag.splat':        0.05,
 };
 
 const sources = layout.map(({ file, dx }) => {

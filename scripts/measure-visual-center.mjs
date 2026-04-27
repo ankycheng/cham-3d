@@ -78,24 +78,54 @@ function decodePng(buf) {
 
 function visualCenterY(img) {
   const { width, height, channels, data } = img;
-  let sumY = 0, count = 0;
-  let minY = Infinity, maxY = -Infinity;
+  // Per-row mass: counts of "lit" pixels per scanline. Then derive a
+  // perceptual center two ways:
+  //   - mean: classic centroid (gets pulled by long thin features like
+  //           Shawa's antlers or ZhaNag's wide base, which is what was
+  //           making the visual alignment look off)
+  //   - peak: the y row with the densest cluster of lit pixels — usually
+  //           coincides with the face/main mass of a Cham mask
+  // We return both so the merge script can pick the more useful one.
+  const rowMass = new Uint32Array(height);
+  let count = 0, minY = Infinity, maxY = -Infinity;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * channels;
       const r = data[i], g = data[i + 1], b = data[i + 2];
-      // Treat very dark pixels as background (canvas bg is #000)
       if (r + g + b > 30) {
-        sumY += y;
+        rowMass[y]++;
         count++;
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
     }
   }
-  return count
-    ? { count, centroidY: sumY / count, minY, maxY, height }
-    : { count: 0, centroidY: 0, minY: 0, maxY: 0, height };
+  if (!count) return { count: 0, centroidY: 0, peakY: 0, medianY: 0, minY: 0, maxY: 0, height };
+
+  // Mean (classic centroid)
+  let sumY = 0;
+  for (let y = 0; y < height; y++) sumY += y * rowMass[y];
+  const meanY = sumY / count;
+
+  // Median row (cumulative mass crosses 50%)
+  let cum = 0, medianY = 0;
+  for (let y = 0; y < height; y++) {
+    cum += rowMass[y];
+    if (cum >= count / 2) { medianY = y; break; }
+  }
+
+  // Peak row (densest scanline, smoothed over a 21-px window so a single
+  // anomalous bright row doesn't win)
+  const W = 21, half = W >> 1;
+  let bestY = 0, bestSum = -1, sliding = 0;
+  for (let y = 0; y < W; y++) sliding += rowMass[y];
+  for (let y = half; y < height - half; y++) {
+    if (sliding > bestSum) { bestSum = sliding; bestY = y; }
+    if (y + half + 1 < height) sliding += rowMass[y + half + 1];
+    if (y - half >= 0) sliding -= rowMass[y - half];
+  }
+
+  return { count, centroidY: meanY, peakY: bestY, medianY, minY, maxY, height };
 }
 
 const results = [];
@@ -108,12 +138,14 @@ for (const file of masks) {
   const tmp = `/tmp/measure-${file}.png`;
   execSync(`${CDP} shot ${TARGET} ${tmp} >/dev/null 2>&1`);
   const img = decodePng(fs.readFileSync(tmp));
-  const { count, centroidY, minY, maxY, height } = visualCenterY(img);
+  const { count, centroidY, peakY, medianY, minY, maxY, height } = visualCenterY(img);
   if (!count) { console.log('  no visible pixels (canvas likely empty)'); continue; }
-  const normalized = centroidY / height;
-  console.log(`  visible px: ${count}, height ${height}, centroid y=${centroidY.toFixed(0)} (${(normalized * 100).toFixed(1)}% from top)`);
-  console.log(`  vertical extent: ${minY}..${maxY}`);
-  results.push({ file, count, centroidY, minY, maxY, height, normalized });
+  console.log(`  visible px: ${count}, height ${height}`);
+  console.log(`  mean y    = ${centroidY.toFixed(0)}  (${(centroidY/height*100).toFixed(1)}%)`);
+  console.log(`  median y  = ${medianY}  (${(medianY/height*100).toFixed(1)}%)`);
+  console.log(`  peak row  = ${peakY}  (${(peakY/height*100).toFixed(1)}%)`);
+  console.log(`  extent    = ${minY}..${maxY}`);
+  results.push({ file, count, centroidY, peakY, medianY, minY, maxY, height });
 }
 
 console.log('\n--- summary ---');
