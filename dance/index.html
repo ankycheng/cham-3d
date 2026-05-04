@@ -162,6 +162,22 @@ body {
     const returnUrl = params.get('return');
     if (returnUrl && /^https?:\/\//.test(returnUrl)) backBtn.href = returnUrl;
   })();
+
+  // Tap outside the video → hide native controls for an immersive view.
+  // Tap back on the player → restore controls so you can pause / scrub.
+  (function () {
+    const video = document.querySelector('video');
+    const wrap = document.querySelector('.player-wrap');
+    if (!video || !wrap) return;
+    document.addEventListener('click', (e) => {
+      const inPlayer = wrap.contains(e.target);
+      if (inPlayer && !video.hasAttribute('controls')) {
+        video.setAttribute('controls', '');
+      } else if (!inPlayer && video.hasAttribute('controls')) {
+        video.removeAttribute('controls');
+      }
+    });
+  })();
 </script>
 
 </body>
