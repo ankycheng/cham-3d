@@ -235,6 +235,7 @@ const masks = [
     tibetan: 'ཤ་བ · Deer Mask',
     desc: 'The deer assistant to the lord of death, Yama. This character clears away obstacles during the Cham performance through lively, leaping movements that mimic the natural behaviors of deer.',
     url: 'viewer.html?url=./mask-shawa.splat',
+    viewHash: '[1,0,0,0,0,1,0,0,0,0,1,0,0,-0.15,2.0,1]',
   },
   {
     name: 'Guru DrakMar',
@@ -270,6 +271,7 @@ const assetVersion = String(Date.parse(document.lastModified) || Date.now());
 function viewerUrlFor(i) {
   const url = new URL(masks[i].url, location.href);
   url.searchParams.set('v', assetVersion);
+  if (masks[i].viewHash) url.hash = encodeURIComponent(masks[i].viewHash);
   return url.toString();
 }
 
